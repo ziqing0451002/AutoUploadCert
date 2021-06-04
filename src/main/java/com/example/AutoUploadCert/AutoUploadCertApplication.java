@@ -8,7 +8,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Scanner;
 
 @SpringBootApplication
@@ -27,8 +30,9 @@ public class AutoUploadCertApplication {
 //        String userPassword = "1234";
 
         if (userAccount != null && userPassword != null){
-            System.out.print("userAccount is " + userAccount + "\nuserPassword is " + userPassword);
+            System.out.print("userAccount is " + userAccount + "\nuserPassword is " + userPassword + "\n");
             String result = AutoUpload(userAccount,userPassword);
+//            String result = userVerify(userAccount,userPassword); //jwt測試
             System.out.println(result);
 
         }
@@ -36,8 +40,13 @@ public class AutoUploadCertApplication {
     }
 
     public static String AutoUpload(String userAccount, String userPassword) throws IOException, JSONException {
-        if (userVerify(userAccount, userPassword)) {
-            String autoUploadURL = "http://localhost:8000/api/TVCertificate/setTVCertificate?userAccount=" + userAccount + "&userPassword=" + userPassword;
+        String jwtTokenString = userVerify(userAccount,userPassword);
+        try {
+            JSONObject jwtTokenJson = new JSONObject(jwtTokenString);
+            String jwtToken = jwtTokenJson.getString("jwt");
+            System.out.println(jwtToken);
+
+            String autoUploadURL = "http://localhost:8000/api/TVCertificate/setTVCertificate?connectAccount=" + userAccount + "&connectPassword=" + userPassword;
             JSONObject jsonData = new JSONObject();
             String[] certColumn = {"certId", "certName", "gettingTime", "agenceFrom", "content"};
             //遍歷上傳目錄下的所有CSV檔案
@@ -66,7 +75,7 @@ public class AutoUploadCertApplication {
                                 //呼叫 Set TV_Cert API
                                 String jsonString = jsonData.toString();
                                 System.out.println("jsonString:" + jsonString);
-                                postMethod(autoUploadURL, jsonString);
+                                postMethod(autoUploadURL, jwtToken, jsonString);
                             }
                             sc.close();
                             System.out.println(uploadComplete);
@@ -84,40 +93,80 @@ public class AutoUploadCertApplication {
             } catch (Exception e) {
                 e.printStackTrace();
             }
+        }catch (Exception e) {
+            e.printStackTrace();
         }
+
+
         return "AutoUpload 結束";
     }
 
-//    public static ArrayList getTagList (BufferedReader br)
-//    {
-//        ArrayList taglist = new ArrayList();
-//        String sData = null;
-//        try
-//        {
-//
-//            while ((sData = br.readLine()) != null)
-//            {
-//                String strArray[] = sData.split(",");
-//                taglist.add(strArray);
-//            }
-//        }
-//        catch (Exception e){
-//            e.printStackTrace();
-//        }
-//        return taglist;
-//    }
+    public static ArrayList getTagList (BufferedReader br)
+    {
+        ArrayList taglist = new ArrayList();
+        String sData = null;
+        try
+        {
 
-    public static boolean userVerify(String userAccount, String userPassword) throws IOException, JSONException {
-        String userVerifyURL = "http://localhost:8000/api/account/userLogin/"+ userAccount +"?userPassword=" + userPassword;
-        String verifyResult = getMethod(userVerifyURL);
-        if (verifyResult.equals("true")){
-            System.out.println("身分驗證成功");
-            return true;
-        }else{
-            System.out.println(verifyResult);
-            return false;
+            while ((sData = br.readLine()) != null)
+            {
+                String strArray[] = sData.split(",");
+                taglist.add(strArray);
+            }
         }
+        catch (Exception e){
+            e.printStackTrace();
+        }
+        return taglist;
     }
+
+    public static String userVerify(String userAccount, String userPassword) throws IOException, JSONException {
+//        String userVerifyURL = "http://localhost:8000/api/account/userLogin/"+ userAccount +"?userPassword=" + userPassword;
+//        String verifyResult = getMethod(userVerifyURL);
+//        if (verifyResult.equals("true")){
+//            System.out.println("身分驗證成功");
+//            return true;
+//        }else{
+//            System.out.println(verifyResult);
+//            return false;
+//        }
+        URL url = new URL("http://localhost:8000/api/account/authenticate");
+        HttpURLConnection postConnection = (HttpURLConnection) url.openConnection();
+        postConnection.setRequestMethod("POST");
+        postConnection.setRequestProperty("Content-Type", "application/json");
+
+        JSONObject jsonData = new JSONObject();
+        jsonData.put("username",userAccount);
+        jsonData.put("password",userPassword);
+        String jsonDataString = jsonData.toString();
+
+        postConnection.setDoOutput(true);
+        OutputStream out = postConnection.getOutputStream();
+        out.write(jsonDataString.getBytes());
+        out.flush();
+        out.close();
+        String jwtResul = null;
+        BufferedReader br = null;
+        if (postConnection.getResponseCode() == 200) {
+            br = new BufferedReader(new InputStreamReader(postConnection.getInputStream()));
+            String strCurrentLine;
+            while ((strCurrentLine = br.readLine()) != null) {
+                System.out.println(strCurrentLine);
+                jwtResul = strCurrentLine;
+            }
+        } else {
+            br = new BufferedReader(new InputStreamReader(postConnection.getErrorStream()));
+            String strCurrentLine;
+            while ((strCurrentLine = br.readLine()) != null) {
+                System.out.println(strCurrentLine);
+                jwtResul = strCurrentLine;
+            }
+        }
+        return jwtResul;
+
+    }
+
+
 
     //get
     public static String getMethod(String url) throws IOException {
@@ -139,13 +188,14 @@ public class AutoUploadCertApplication {
     }
 
     //post
-    public static boolean postMethod(String url, String query) throws IOException {
+    public static boolean postMethod(String url, String jwtToken, String query) throws IOException {
         URL restURL = new URL(url);
         System.out.println("url:" + url);
         System.out.println("query:" + query);
         HttpURLConnection conn = (HttpURLConnection) restURL.openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("Authorization", "Bearer " + jwtToken);
         conn.setDoOutput(true);
 
         PrintStream ps = new PrintStream(conn.getOutputStream());
@@ -163,4 +213,23 @@ public class AutoUploadCertApplication {
         return true;
     }
 
+}
+
+class ParameterStringBuilder {
+    public static String getParamsString(Map<String, String> params)
+            throws UnsupportedEncodingException{
+        StringBuilder result = new StringBuilder();
+
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            result.append(URLEncoder.encode(entry.getKey(), "UTF-8"));
+            result.append("=");
+            result.append(URLEncoder.encode(entry.getValue(), "UTF-8"));
+            result.append("&");
+        }
+
+        String resultString = result.toString();
+        return resultString.length() > 0
+                ? resultString.substring(0, resultString.length() - 1)
+                : resultString;
+    }
 }
